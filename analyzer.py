@@ -1,27 +1,49 @@
-# 📄 analyzer.py
+"""
+Data analysis module for comprehensive dataset analysis.
+
+Provides detailed statistical analysis and summary generation for DataFrames.
+"""
 
 import pandas as pd
 import numpy as np
+import logging
+from typing import List, Optional
 
-def analyze_dataframe(df: pd.DataFrame, id_columns: list = []) -> str:
+logger = logging.getLogger(__name__)
+
+def analyze_dataframe(df: pd.DataFrame, id_columns: Optional[List[str]] = None) -> str:
+    """
+    Generate comprehensive analysis summary of a DataFrame.
+
+    Args:
+        df: DataFrame to analyze
+        id_columns: List of columns to check for duplicates (ID columns)
+
+    Returns:
+        str: Formatted analysis summary
+    """
+    if id_columns is None:
+        id_columns = []
+
+    logger.info(f"Starting analysis of DataFrame with shape {df.shape}")
     buffer = []
 
-    # ✅ 1. Dataset Shape
-    buffer.append(f"✅ **Dataset Shape**: {df.shape[0]:,} rows × {df.shape[1]} columns\n")
+    # Dataset Shape
+    buffer.append(f"Dataset Shape: {df.shape[0]:,} rows × {df.shape[1]} columns\n")
 
-    # ✅ 2. Data Types and Schema
-    buffer.append("✅ **Data Types & Schema:**")
+    # Data Types and Schema
+    buffer.append("Data Types & Schema:")
     for col in df.columns:
         buffer.append(f"- {col}: {df[col].dtype}")
     buffer.append("")
 
-    # ✅ 3. Column Names
-    buffer.append("✅ **Column Names:**")
+    # Column Names
+    buffer.append("Column Names:")
     buffer.append(", ".join(df.columns))
     buffer.append("")
 
-    # ✅ 4. Missing Values
-    buffer.append("✅ **Missing Values (count and %):**")
+    # Missing Values
+    buffer.append("Missing Values (count and %):")
     total_rows = df.shape[0]
     for col in df.columns:
         missing = df[col].isnull().sum()
@@ -32,17 +54,17 @@ def analyze_dataframe(df: pd.DataFrame, id_columns: list = []) -> str:
             buffer.append(f"- {col}: 0 missing (0%)")
     buffer.append("")
 
-    # ✅ 5. Duplicate Records
+    # Duplicate Records
     dup_rows = df.duplicated().sum()
-    buffer.append(f"✅ **Duplicate Records:** {dup_rows} duplicate rows based on all columns.")
+    buffer.append(f"Duplicate Records: {dup_rows} duplicate rows based on all columns.")
     for col in id_columns:
         if col in df.columns:
             dup_ids = df[col].duplicated().sum()
             buffer.append(f"- {dup_ids} duplicate entries in `{col}` (ID check)")
     buffer.append("")
 
-    # ✅ 6. Summary Statistics (numerical only)
-    buffer.append("✅ **Summary Statistics (Numerical Columns):**")
+    # Summary Statistics (numerical only)
+    buffer.append("Summary Statistics (Numerical Columns):")
     numeric_df = df.select_dtypes(include=np.number)
     if numeric_df.shape[1] > 0:
         desc = numeric_df.describe(percentiles=[.25, .5, .75]).T
@@ -53,8 +75,8 @@ def analyze_dataframe(df: pd.DataFrame, id_columns: list = []) -> str:
         buffer.append("No numerical columns found.")
     buffer.append("")
 
-    # ✅ 7. Unique Values / Cardinality
-    buffer.append("✅ **Unique Values (Categorical Columns):**")
+    # Unique Values / Cardinality
+    buffer.append("Unique Values (Categorical Columns):")
     cat_df = df.select_dtypes(include='object')
     if cat_df.shape[1] > 0:
         for col in cat_df.columns:
@@ -64,11 +86,12 @@ def analyze_dataframe(df: pd.DataFrame, id_columns: list = []) -> str:
         buffer.append("No categorical columns found.")
     buffer.append("")
 
-    # ✅ 8. Sample Data Preview
-    buffer.append("✅ **Sample Data Preview:**")
-    buffer.append("**First 5 rows:**")
+    # Sample Data Preview
+    buffer.append("Sample Data Preview:")
+    buffer.append("First 5 rows:")
     buffer.append(df.head().to_markdown(index=False))
-    buffer.append("\n**Last 5 rows:**")
+    buffer.append("\nLast 5 rows:")
     buffer.append(df.tail().to_markdown(index=False))
-    
+
+    logger.info("DataFrame analysis completed")
     return "\n".join(buffer)

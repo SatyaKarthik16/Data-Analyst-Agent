@@ -2,29 +2,37 @@
 pandas
 numpy
 tqdm
-ast
-astor
 
 # File Handling
 openpyxl
+xlrd >= 2.0.1
 python-dotenv
 
-# LangChain Ecosystem
+# LangChain Ecosystem (Updated)
 langchain
+langchain-openai
 langgraph
 
 # LLM Providers
 openai
-# Uncomment if using Anthropic (Claude)
-# anthropic
 
 # Frontend UI
 streamlit
 
-# Code Execution Safety (Optional)
-nbformat  # For future notebook support
-jupyter_client  # For safe execution context if needed
+# Code Execution Safety
+restrictedpython
+
+# Data Analysis & ML
+scikit-learn
+matplotlib
+seaborn
+sqlalchemy
+requests
 
 # Testing & Dev Tools
 pytest
 ipykernel
+
+# Optional
+# nbformat  # For future notebook support
+# jupyter_client  # For safe execution context if needed
