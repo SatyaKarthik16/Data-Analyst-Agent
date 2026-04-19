@@ -14,7 +14,15 @@ from llm_suggester import get_cleaning_suggestions
 from code_generator import generate_python_code_from_final_instructions
 from executor import execute_cleaning_code
 from data_analysis import DataAnalyzer
-from history_manager import save_cleaning_session, get_history
+from history_manager import (
+    save_cleaning_session,
+    get_history,
+    load_version,
+    get_next_version_id,
+    save_analysis_session,
+    get_analysis_history,
+    load_analysis_session,
+)
 import logging
 
 # Configure page
@@ -85,6 +93,16 @@ def apply_custom_style():
     st.markdown(css, unsafe_allow_html=True)
 
 apply_custom_style()
+
+
+def persist_analysis_result(version_id, analysis_type, payload, notes=""):
+    analysis_id = save_analysis_session(
+        version_id=version_id,
+        analysis_type=analysis_type,
+        result=payload,
+        notes=notes,
+    )
+    st.success(f"Saved analysis snapshot as {analysis_id}")
 
 def show_data_cleaning_page():
     """Data Cleaning Page - Upload, clean, and prepare data"""
@@ -282,7 +300,7 @@ def show_data_cleaning_page():
 
                 # --- Save & Export ---
                 st.header("Step 7: Save & Export")
-                version_id = f"v{len(get_history()) + 1}"
+                version_id = get_next_version_id()
                 col1, col2, col3 = st.columns(3)
 
                 with col1:
@@ -291,8 +309,10 @@ def show_data_cleaning_page():
                             version_id=version_id,
                             df=cleaned_df,
                             code=st.session_state["cleaning_code"],
-                            instructions=final_instructions
+                            instructions=final_instructions,
+                            source_name=uploaded_file.name,
                         )
+                        st.session_state['active_version_id'] = version_id
                         st.success(f"Saved as {version_id}")
 
                 with col2:
@@ -338,13 +358,84 @@ def show_data_analysis_page():
     st.title("Advanced Data Analysis Dashboard")
     st.markdown("Perform statistical analysis, machine learning, and generate insights from your cleaned data.")
 
-    # Check if cleaned data exists
-    if "cleaned_df" not in st.session_state:
-        st.warning("**No cleaned data available!**")
-        st.info("Please go to the **Data Cleaning** page first to upload and clean your data.")
+    st.header("Analysis Data Source")
+    cleaning_history = get_history()
+    source_options = {}
+
+    if "cleaned_df" in st.session_state:
+        source_options["session"] = "Current session cleaned data"
+
+    for item in reversed(cleaning_history):
+        version_id = item.get("version_id", "")
+        timestamp = item.get("timestamp", "")
+        rows = item.get("rows", "?")
+        columns = item.get("columns", "?")
+        source_name = item.get("source_name", "")
+        source_label = f"{version_id} | {timestamp} | {rows} rows x {columns} cols"
+        if source_name:
+            source_label += f" | source: {source_name}"
+        source_options[version_id] = source_label
+
+    if not source_options:
+        st.warning("No cleaned data available yet.")
+        st.info("Save a cleaned dataset from Data Cleaning first, then you can analyze it anytime later.")
         return
 
-    df = st.session_state['cleaned_df']
+    default_source = st.session_state.get("active_version_id", "session")
+    if default_source not in source_options:
+        default_source = list(source_options.keys())[0]
+
+    selected_source = st.selectbox(
+        "Choose dataset for analysis:",
+        options=list(source_options.keys()),
+        index=list(source_options.keys()).index(default_source),
+        format_func=lambda key: source_options[key],
+    )
+
+    if selected_source == "session":
+        df = st.session_state['cleaned_df']
+        active_version_id = st.session_state.get('active_version_id', 'session')
+    else:
+        try:
+            df = load_version(selected_source)
+            st.session_state['cleaned_df'] = df
+            st.session_state['active_version_id'] = selected_source
+            active_version_id = selected_source
+        except Exception as e:
+            st.error(f"Failed to load saved cleaned dataset {selected_source}: {e}")
+            return
+
+    st.caption(f"Active dataset version: {active_version_id}")
+    st.subheader("Saved Analysis Sessions")
+    analysis_history = get_analysis_history(active_version_id)
+    if analysis_history:
+        selected_analysis_id = st.selectbox(
+            "Open a previous analysis result:",
+            options=[item["analysis_id"] for item in analysis_history],
+            format_func=lambda analysis_id: next(
+                (
+                    f"{item['analysis_id']} | {item['analysis_type']} | {item['timestamp']}"
+                    for item in analysis_history
+                    if item["analysis_id"] == analysis_id
+                ),
+                analysis_id,
+            ),
+        )
+
+        if st.button("Load Selected Analysis", use_container_width=True):
+            try:
+                loaded_analysis = load_analysis_session(selected_analysis_id)
+                st.success(
+                    f"Loaded {loaded_analysis.get('analysis_type', 'analysis')} from {loaded_analysis.get('timestamp', '')}"
+                )
+                st.json(loaded_analysis.get("result", {}))
+            except Exception as e:
+                st.error(f"Unable to load analysis session: {e}")
+    else:
+        st.info("No saved analysis sessions for this dataset yet.")
+
+    st.markdown("---")
+
     analyzer = DataAnalyzer(df)
 
     # Dashboard Overview
@@ -445,6 +536,15 @@ def show_data_analysis_page():
             else:
                 st.success("No missing values found in the dataset!")
 
+        if st.button("Save This Analysis", key="save_basic_stats"):
+            payload = {
+                "shape": list(df.shape),
+                "numeric_summary": df[analyzer.numeric_cols].describe().to_dict() if analyzer.numeric_cols else {},
+                "dtypes": df.dtypes.astype(str).to_dict(),
+                "missing": df.isnull().sum().to_dict(),
+            }
+            persist_analysis_result(active_version_id, "Basic Statistics", payload)
+
     # Correlation Analysis
     elif analysis_type == "Correlation Analysis":
         st.subheader("Correlation Analysis")
@@ -477,6 +577,13 @@ def show_data_analysis_page():
                 st.dataframe(strong_corr, use_container_width=True)
             else:
                 st.info("No strong correlations found.")
+
+            if st.button("Save This Analysis", key="save_correlation"):
+                payload = {
+                    "correlation_matrix": corr_matrix.to_dict(),
+                    "strong_correlations": strong_corr.to_dict(orient="records"),
+                }
+                persist_analysis_result(active_version_id, "Correlation Analysis", payload)
 
     # Outlier Detection
     elif analysis_type == "Outlier Detection":
@@ -514,6 +621,14 @@ def show_data_analysis_page():
                             ax.set_title(f'{col} Distribution with Outliers')
                             ax.legend()
                             st.pyplot(fig)
+
+                if st.button("Save This Analysis", key="save_outliers"):
+                    payload = {
+                        "method": method,
+                        "total_outliers": total_outliers,
+                        "outlier_details": outliers,
+                    }
+                    persist_analysis_result(active_version_id, "Outlier Detection", payload)
             else:
                 st.success("No outliers detected using the selected method!")
 
@@ -534,10 +649,11 @@ def show_data_analysis_page():
                 )
 
             with col2:
+                available_features = [col for col in analyzer.numeric_cols if col != target]
                 features = st.multiselect(
                     "Feature Variables (X):",
-                    [col for col in analyzer.numeric_cols if col != target],
-                    default=analyzer.numeric_cols[:1] if len(analyzer.numeric_cols) > 1 else [],
+                    available_features,
+                    default=available_features[:1] if available_features else [],
                     key="regression_features"
                 )
 
@@ -583,6 +699,14 @@ def show_data_analysis_page():
                     ax.set_title('Actual vs Predicted Values')
                     ax.legend()
                     st.pyplot(fig)
+
+                    if st.button("Save This Analysis", key="save_regression"):
+                        payload = {
+                            "target": target,
+                            "features": features,
+                            "results": results,
+                        }
+                        persist_analysis_result(active_version_id, "Regression Analysis", payload)
 
                 except Exception as e:
                     st.error(f"Regression analysis failed: {e}")
@@ -647,6 +771,14 @@ def show_data_analysis_page():
                         plt.colorbar(scatter, ax=ax, label='Cluster')
                         st.pyplot(fig)
 
+                    if st.button("Save This Analysis", key="save_clustering"):
+                        payload = {
+                            "features": features,
+                            "n_clusters": n_clusters,
+                            "results": results,
+                        }
+                        persist_analysis_result(active_version_id, "Clustering Analysis", payload)
+
                 except Exception as e:
                     st.error(f"Clustering analysis failed: {e}")
 
@@ -683,6 +815,13 @@ def show_data_analysis_page():
                 file_name="data_analysis_insights.txt",
                 mime="text/plain"
             )
+
+            if st.button("Save This Analysis", key="save_ai_insights"):
+                payload = {
+                    "analysis_summary": analysis_summary,
+                    "insights": insights,
+                }
+                persist_analysis_result(active_version_id, "AI Insights", payload)
 
     # Data Quality Report
     elif analysis_type == "Data Quality Report":
@@ -736,6 +875,14 @@ def show_data_analysis_page():
             st.info(" Good data quality with minor issues.")
         else:
             st.warning("Data quality needs improvement.")
+
+        if st.button("Save This Analysis", key="save_quality_report"):
+            payload = {
+                "report_data": report_data,
+                "column_quality": quality_df.to_dict(orient="records"),
+                "overall_score": overall_score,
+            }
+            persist_analysis_result(active_version_id, "Data Quality Report", payload)
 
 if page == "Data Cleaning":
     show_data_cleaning_page()
